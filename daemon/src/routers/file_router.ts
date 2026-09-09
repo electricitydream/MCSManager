@@ -4,6 +4,7 @@ import path from "path";
 import { globalConfiguration, globalEnv } from "../entity/config";
 import Instance, { GLOBAL_INSTANCE_UUID_KEY } from "../entity/instance/instance";
 import { $t } from "../i18n";
+import { DockerComposeService } from "../service/docker_compose_service";
 import downloadManager from "../service/download_manager";
 import { getFileManager, getWindowsDisks } from "../service/file_router_service";
 import logger from "../service/log";
@@ -144,6 +145,30 @@ routerApp.on("file/status", async (ctx, data) => {
       isGlobalInstance: data.instanceUuid === GLOBAL_INSTANCE_UUID_KEY,
       disks: getWindowsDisks()
     });
+  } catch (error: any) {
+    protocol.responseError(ctx, error);
+  }
+});
+
+// Read the managed compose file content (data/InstanceCompose/<uuid>.yml)
+routerApp.on("file/compose_content", async (ctx, data) => {
+  try {
+    const instance = InstanceSubsystem.getInstance(data.instanceUuid);
+    if (!instance) throw new Error($t("TXT_CODE_3bfb9e04"));
+    const result = await DockerComposeService.readComposeContent(instance);
+    protocol.response(ctx, result);
+  } catch (error: any) {
+    protocol.responseError(ctx, error);
+  }
+});
+
+// Save the managed compose file content (validates YAML and single-service)
+routerApp.on("file/compose_save", async (ctx, data) => {
+  try {
+    const instance = InstanceSubsystem.getInstance(data.instanceUuid);
+    if (!instance) throw new Error($t("TXT_CODE_3bfb9e04"));
+    const result = await DockerComposeService.saveComposeContent(instance, String(data.text ?? ""));
+    protocol.response(ctx, result);
   } catch (error: any) {
     protocol.responseError(ctx, error);
   }

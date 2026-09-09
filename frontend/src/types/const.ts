@@ -151,7 +151,9 @@ export const defaultDockerConfig: IGlobalInstanceDockerConfig = {
   gpuDeviceIds: [],
   gpuDriver: "nvidia",
   deviceReadBps: [],
-  deviceWriteBps: []
+  deviceWriteBps: [],
+  useCompose: false,
+  composeRemoveContainer: true
 };
 
 export const defaultInstanceJavaConfig: IInstanceJavaConfig = {

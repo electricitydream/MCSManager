@@ -1,6 +1,6 @@
 {
   "name": "mcsmanager-panel",
-  "version": "10.18.3",
+  "version": "10.18.4",
   "daemonVersion": "4.18.3",
   "description": "Provide MCSManager with the ability to connect and control all Daemons, and provide API services for the front end.",
   "scripts": {
