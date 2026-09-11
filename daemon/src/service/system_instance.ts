@@ -16,6 +16,7 @@ import InstanceConfig from "../entity/instance/Instance_config";
 import { $t } from "../i18n";
 import { sleep } from "../utils/sleep";
 import logger from "./log";
+import { DockerComposeService } from "./docker_compose_service";
 import InstanceControl from "./system_instance_control";
 import takeoverContainer from "./takeover_container";
 
@@ -220,6 +221,8 @@ class InstanceSubsystem extends EventEmitter {
       this.instances.delete(instanceUuid);
       StorageSubsystem.delete("InstanceConfig", instanceUuid);
       InstanceControl.deleteInstanceAllTask(instanceUuid);
+      // Clean up the docker compose override file if any
+      DockerComposeService.removeOverrideFile(instance);
       if (deleteFile) fs.remove(instance.absoluteCwdPath(), (err) => {});
       return true;
     }
@@ -317,12 +320,15 @@ class InstanceSubsystem extends EventEmitter {
   }
 
   // Soft exit: optional docker skip and configurable wait timeout
-  softExit(skipDocker = true, waitSeconds = 10) {
+  softExit(skipDocker = true, skipDockerCompose = false, waitSeconds = 10) {
     const promises: Promise<void>[] = [];
     for (const iterator of this.instances) {
       const instance = iterator[1];
       if (instance.status() !== Instance.STATUS_STOP) {
-        if (skipDocker && instance.config.processType === "docker") {
+        const isDocker = instance.config.processType === "docker";
+        const isComposeDocker = isDocker && Boolean(instance.config.docker?.useCompose);
+        const shouldSkip = isComposeDocker ? skipDockerCompose : isDocker ? skipDocker : false;
+        if (shouldSkip) {
           logger.info(
             `Skipping Docker instance ${instance.config.nickname} (${instance.instanceUuid}) during soft shutdown...`
           );
@@ -342,7 +348,10 @@ class InstanceSubsystem extends EventEmitter {
         checkCount++;
         for (const [_, instance] of this.instances) {
           if (instance.status() !== Instance.STATUS_STOP) {
-            if (skipDocker && instance.config.processType === "docker") continue;
+            const isDocker = instance.config.processType === "docker";
+            const isComposeDocker = isDocker && Boolean(instance.config.docker?.useCompose);
+            const shouldSkip = isComposeDocker ? skipDockerCompose : isDocker ? skipDocker : false;
+            if (shouldSkip) continue;
             count++;
             if (checkCount > waitSeconds) {
               logger.info(

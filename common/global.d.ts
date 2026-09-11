@@ -114,6 +114,12 @@ declare global {
     /** Docker device read/write BPS. Format: /dev/sda:10MB */
     deviceReadBps?: string[];
     deviceWriteBps?: string[];
+    /** Whether to manage the container via docker compose instead of creating it directly.
+     *  Only single-service compose files (service count == 1) are supported. */
+    useCompose?: boolean;
+    /** In compose mode, remove the container on stop (`compose down`, default true);
+     *  when false only stops it (`compose stop`). */
+    composeRemoveContainer?: boolean;
   }
 
   interface IPanelResponseProtocol {
@@ -184,6 +190,7 @@ declare global {
       outputBufferSize: number;
       enableSoftShutdown: boolean;
       softShutdownSkipDocker: boolean;
+      softShutdownSkipDockerCompose?: boolean;
       softShutdownWaitSeconds: number;
     };
     dockerPlatforms?: string[];

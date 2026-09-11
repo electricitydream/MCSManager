@@ -80,7 +80,7 @@ const prettyBytesConfig: PrettyOptions = {
 const formatStorageUsage = (usage?: number, limit?: number) => {
   const fUsage = prettyBytes(usage ?? 0, prettyBytesConfig);
   const fLimit = prettyBytes(limit ?? 0, prettyBytesConfig);
-  return limit ? `${fUsage} / ${fLimit}` : fUsage;
+  return limit ? `${fUsage} / ${fLimit}` : `${fUsage} / ∞ GiB`;
 };
 
 const formatNetworkSpeed = (bytes?: number) =>

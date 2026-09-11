@@ -252,6 +252,102 @@ router.put(
   }
 );
 
+// [Low-level Permission]
+// Read the managed compose file (data/InstanceCompose/<uuid>.yml)
+router.get(
+  "/compose_content",
+  speedLimit(1),
+  permission({ level: ROLE.USER }),
+  validator({ query: { daemonId: String, uuid: String } }),
+  async (ctx) => {
+    try {
+      const daemonId = String(ctx.query.daemonId);
+      const instanceUuid = String(ctx.query.uuid);
+      const remoteService = RemoteServiceSubsystem.getInstance(daemonId);
+      const result = await new RemoteRequest(remoteService).request(
+        "file/compose_content",
+        { instanceUuid },
+        100000
+      );
+      ctx.body = result;
+    } catch (err) {
+      ctx.body = err;
+    }
+  }
+);
+
+// [Low-level Permission]
+// Read the compose resource-limit info for display (memory/network/image/container name)
+router.get(
+  "/compose_info",
+  speedLimit(1),
+  permission({ level: ROLE.USER }),
+  validator({ query: { daemonId: String, uuid: String } }),
+  async (ctx) => {
+    try {
+      const daemonId = String(ctx.query.daemonId);
+      const instanceUuid = String(ctx.query.uuid);
+      const remoteService = RemoteServiceSubsystem.getInstance(daemonId);
+      const result = await new RemoteRequest(remoteService).request(
+        "file/compose_info",
+        { instanceUuid },
+        100000
+      );
+      ctx.body = result;
+    } catch (err) {
+      ctx.body = err;
+    }
+  }
+);
+
+// [Low-level Permission]
+// Save the managed compose file (validated by the daemon)
+router.put(
+  "/compose_save",
+  speedLimit(1),
+  permission({ level: ROLE.USER }),
+  validator({ query: { daemonId: String, uuid: String }, body: { text: String } }),
+  async (ctx) => {
+    try {
+      const daemonId = String(ctx.query.daemonId);
+      const instanceUuid = String(ctx.query.uuid);
+      const text = String(ctx.request.body.text);
+      const remoteService = RemoteServiceSubsystem.getInstance(daemonId);
+
+      let textBefore: string | null = null;
+      try {
+        const before = await new RemoteRequest(remoteService).request(
+          "file/compose_content",
+          { instanceUuid },
+          100000
+        );
+        textBefore = before?.text ?? null;
+      } catch (err) {
+        textBefore = null;
+      }
+
+      const result = await new RemoteRequest(remoteService).request(
+        "file/compose_save",
+        { instanceUuid, text },
+        100000
+      );
+
+      if (textBefore !== text) {
+        operationLogger.log("instance_file_update", {
+          ...getOperationLoggerOperator(ctx),
+          instance_id: instanceUuid,
+          daemon_id: daemonId,
+          instance_name: await getInstanceNameSafely(daemonId, instanceUuid),
+          file: `InstanceCompose/${instanceUuid}.yml`
+        });
+      }
+      ctx.body = result;
+    } catch (err) {
+      ctx.body = err;
+    }
+  }
+);
+
 router.post(
   "/copy",
   permission({ level: ROLE.USER }),

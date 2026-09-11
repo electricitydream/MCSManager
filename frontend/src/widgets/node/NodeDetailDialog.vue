@@ -33,6 +33,7 @@ const DEFAULT_CONFIG = {
   outputBufferSize: 256,
   enableSoftShutdown: true,
   softShutdownSkipDocker: true,
+  softShutdownSkipDockerCompose: false,
   softShutdownWaitSeconds: 10
 };
 
@@ -99,6 +100,7 @@ const openDialog = (data?: ComputedNodeInfo, uuid?: string) => {
     dialog.data = {
       ...data,
       ...data.config,
+      softShutdownSkipDockerCompose: data.config?.softShutdownSkipDockerCompose ?? false,
       port: data.port, // connection port
       daemonPort: data.config?.port ?? 24444, // listen port
       apiKey: "",
@@ -323,6 +325,19 @@ defineExpose({ openDialog });
                   </a-typography-text>
                 </a-typography-paragraph>
                 <a-switch v-model:checked="dialog.data.softShutdownSkipDocker" />
+              </a-form-item>
+            </a-col>
+            <a-col :span="12">
+              <a-form-item
+                :label="t('TXT_CODE_daemon_softShutdownSkipDockerCompose')"
+                name="softShutdownSkipDockerCompose"
+              >
+                <a-typography-paragraph>
+                  <a-typography-text type="secondary">
+                    {{ t("TXT_CODE_daemon_softShutdownSkipDockerComposeInfo") }}
+                  </a-typography-text>
+                </a-typography-paragraph>
+                <a-switch v-model:checked="dialog.data.softShutdownSkipDockerCompose" />
               </a-form-item>
             </a-col>
             <a-col :span="12">

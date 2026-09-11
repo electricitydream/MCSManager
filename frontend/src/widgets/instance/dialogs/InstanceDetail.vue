@@ -9,25 +9,28 @@ import {
   useVolumeEditDialog
 } from "@/components/fc";
 import { INSTANCE_TYPE_TRANSLATION } from "@/hooks/useInstance";
+import { useKeyboardEvents } from "@/hooks/useKeyboardEvents";
 import { SEARCH_ALL_KEY, useMarketPackages, type FilterOption } from "@/hooks/useMarketPackages";
 import { useScreen } from "@/hooks/useScreen";
 import { isCN, t } from "@/lang/i18n";
 import { getNetworkModeList } from "@/services/apis/envImage";
+import { composeContent, composeSave } from "@/services/apis/fileManager";
 import { updateAnyInstanceConfig } from "@/services/apis/instance";
 import { dockerPortsArray } from "@/tools/common";
 import { reportErrorMsg } from "@/tools/validator";
 import type { DockerNetworkModes, InstanceDetail, QuickStartPackages } from "@/types";
-import { defaultQuickStartPackages, TERMINAL_CODE } from "@/types/const";
+import { defaultDockerConfig, defaultQuickStartPackages, INSTANCE_STATUS_CODE, TERMINAL_CODE } from "@/types/const";
 import { CheckOutlined, CloseOutlined } from "@ant-design/icons-vue";
 import type { FormInstance } from "ant-design-vue";
 import { message } from "ant-design-vue";
 import type { Rule } from "ant-design-vue/es/form";
 import { Dayjs } from "dayjs";
 import _ from "lodash";
-import { computed, defineComponent, ref, unref } from "vue";
+import { computed, defineComponent, ref, unref, watch } from "vue";
 import { GLOBAL_INSTANCE_NAME } from "../../../config/const";
 import { dayjsToTimestamp, timestampToDayjs } from "../../../tools/time";
 import DockerImageSelect from "./components/DockerImageSelect.vue";
+import Editor from "../../../components/Editor.vue";
 
 interface FormDetail extends InstanceDetail {
   dayjsEndTime?: Dayjs;
@@ -65,9 +68,66 @@ enum TabSettings {
   // eslint-disable-next-line no-unused-vars
   Advanced,
   // eslint-disable-next-line no-unused-vars
-  ResLimit
+  ResLimit,
+  // eslint-disable-next-line no-unused-vars
+  ComposeEditor
 }
 const activeKey = ref<TabSettings>(TabSettings.Basic);
+
+// ---- Compose Editor ----
+const composeEditorText = ref("");
+const composeLoaded = ref(false);
+const { state: composeTextState, execute: executeComposeContent } =
+  composeContent();
+const { execute: executeComposeSave } = composeSave();
+
+const loadComposeContent = async () => {
+  try {
+    await executeComposeContent({
+      params: { daemonId: props.daemonId ?? "", uuid: props.instanceId ?? "" }
+    });
+    const text = composeTextState.value as { text?: string } | string | null;
+    if (typeof text === "string") {
+      composeEditorText.value = text;
+    } else if (text && typeof text.text === "string") {
+      composeEditorText.value = text.text;
+    }
+  } catch (err: any) {
+    reportErrorMsg(err.message);
+  } finally {
+    composeLoaded.value = true;
+  }
+};
+
+const saveComposeContent = async () => {
+  await executeComposeSave({
+    params: { daemonId: props.daemonId ?? "", uuid: props.instanceId ?? "" },
+    data: { text: composeEditorText.value }
+  });
+};
+
+// Ctrl+S in the compose editor: save the compose file only
+let useComposeKeyboardEventsHooks: ReturnType<typeof useKeyboardEvents> | null = null;
+
+const initComposeKeydownListener = () => {
+  if (useComposeKeyboardEventsHooks) return;
+  useComposeKeyboardEventsHooks = useKeyboardEvents(
+    { ctrl: true, alt: false, caseSensitive: false, key: "s" },
+    async () => {
+      try {
+        await saveComposeContent();
+        message.success(t("TXT_CODE_8f47d95"));
+      } catch (err: any) {
+        return reportErrorMsg(err.message);
+      }
+    }
+  );
+  useComposeKeyboardEventsHooks.startKeydownListener();
+};
+
+const removeComposeKeydownListener = () => {
+  useComposeKeyboardEventsHooks?.removeKeydownListener();
+};
 
 const UPDATE_CMD_DESCRIPTION = t("TXT_CODE_fa487a47");
 const UPDATE_CMD_TEMPLATE =
@@ -124,7 +184,7 @@ const formRules = computed<Record<string, any>>(() => ({
           {
             required: true,
             validator: async (_rule: Rule, value: string) => {
-              if (!isDockerMode.value) return;
+              if (!isDockerMode.value || isComposeMode.value) return;
               const ErrMsg =
                 formData.value?.instance?.imageSelectMethod === "EDIT"
                   ? t("TXT_CODE_9fed23ab")
@@ -137,7 +197,7 @@ const formRules = computed<Record<string, any>>(() => ({
         networkMode: [
           {
             validator: async (_rule: Rule, value: string) => {
-              if (!isDockerMode.value) return;
+              if (!isDockerMode.value || isComposeMode.value) return;
               if (value === "") throw new Error(t("TXT_CODE_b52cb76c"));
             }
           }
@@ -259,6 +319,64 @@ const initGpuDeviceIdsText = () => {
   gpuDeviceIdsText.value = docker?.gpuDeviceIds?.join(",") || "";
 };
 
+const isComposeMode = computed(
+  () => formData?.value?.instance?.config?.docker?.useCompose === true && isDockerMode.value
+);
+
+const isInstanceRunning = computed(
+  () => props.instanceInfo?.status === INSTANCE_STATUS_CODE.RUNNING
+);
+
+// 开启 compose 时，其余 Docker 配置项均不适用：把非 compose 字段重置为默认空值，
+// 仅保留 useCompose / composeRemoveContainer 两个开关本身；
+// maxSpace（磁盘配额）与容器化方式无关，compose 模式同样生效，一并保留。
+const clearNativeDockerFields = () => {
+  const docker: any = formData.value?.instance?.config?.docker;
+  if (!docker) return;
+  const defaults: any = { ...defaultDockerConfig };
+  Object.keys(docker).forEach((k) => {
+    if (k === "useCompose" || k === "composeRemoveContainer" || k === "maxSpace") return;
+    if (k in defaults) docker[k] = defaults[k];
+  });
+  // 同步清空绑定的文本辅助字段
+  formData.value.instance!.networkAliasesText = "";
+  formData.value.instance!.deviceReadBpsText = "";
+  formData.value.instance!.deviceWriteBpsText = "";
+  gpuDeviceIdsText.value = "";
+};
+
+watch(isComposeMode, (on) => {
+  if (on) clearNativeDockerFields();
+});
+
+watch(activeKey, (key) => {
+  if (key === TabSettings.ComposeEditor) {
+    if (!composeLoaded.value) {
+      loadComposeContent();
+    }
+    initComposeKeydownListener();
+  } else {
+    removeComposeKeydownListener();
+  }
+});
+
+// Clean up the compose Ctrl+S listener when the dialog is closed.
+// When the dialog is reopened while still on the compose tab (the active key
+// persists across close/reopen since the component stays mounted), reload the
+// content and re-register the Ctrl+S listener.
+watch(open, (val) => {
+  if (!val) {
+    removeComposeKeydownListener();
+    return;
+  }
+  if (activeKey.value === TabSettings.ComposeEditor) {
+    if (!composeLoaded.value) {
+      loadComposeContent();
+    }
+    initComposeKeydownListener();
+  }
+});
+
 const onGpuAllocModeChange = () => {
   const docker = formData.value.instance?.config?.docker;
   if (!docker) return;
@@ -311,6 +429,8 @@ const openDialog = async ({ item, i }: { item?: QuickStartPackages; i?: number }
     await Promise.all([loadNetworkModes()]);
   }
   initFormDetail();
+  composeLoaded.value = false;
+  composeEditorText.value = "";
   open.value = true;
 };
 
@@ -334,6 +454,12 @@ const submit = async () => {
         },
         data: postData?.config!
       });
+      // Persist the compose file if the compose editor was loaded in this session
+      // (content stays in composeEditorText even after switching tabs)
+      if (composeLoaded.value) {
+        await saveComposeContent();
+      }
+      removeComposeKeydownListener();
       emit("update");
       open.value = false;
       return message.success(t("TXT_CODE_d3de39b4"));
@@ -878,6 +1004,7 @@ defineExpose({
                       v-model:value="formData.instance.config.startCommand"
                       :rows="5"
                       style="min-height: 40px"
+                      :disabled="isComposeMode"
                       :placeholder="isDockerMode ? t('TXT_CODE_98e7c829') : t('TXT_CODE_f50cfe2')"
                     />
                   </a-input-group>
@@ -961,7 +1088,7 @@ defineExpose({
                   <a-input
                     v-model:value="formData.instance.config.updateCommand"
                     :placeholder="UPDATE_CMD_TEMPLATE"
-                    :disabled="isGlobalTerminal"
+                    :disabled="isGlobalTerminal || isComposeMode"
                   />
                 </a-form-item>
               </a-col>
@@ -984,7 +1111,7 @@ defineExpose({
                     :is-allow-host-text="t('TXT_CODE_update_cmd_no_image')"
                     :model-value="formData.instance.config?.docker?.updateCommandImage ?? 'HOST'"
                     :image-select-method="formData.instance.imageSelectMethod ?? 'SELECT'"
-                    :daemon-id="daemonId ?? ''"
+                    :daemon-id="daemonId ?? ''" :disabled="isComposeMode"
                     @update:model-value="
                       (v) => (formData.instance.config!.docker!.updateCommandImage = v)
                     "
@@ -1062,7 +1189,7 @@ defineExpose({
                   <div class="ml-4">
                     <a-switch
                       v-model:checked="formData.instance.config.processType"
-                      :disabled="isGlobalTerminal"
+                      :disabled="isGlobalTerminal || isInstanceRunning"
                       checked-value="docker"
                       un-checked-value="general"
                     >
@@ -1073,6 +1200,49 @@ defineExpose({
                 </a-form-item>
               </a-col>
               <template v-if="isDockerMode">
+                <!-- Use Compose management switch -->
+                <a-col :xs="24" :lg="24" :offset="0">
+                  <a-form-item>
+                    <a-typography-title :level="5">
+                      {{ t("TXT_CODE_use_compose_management") }}
+                      <a-tag color="green">Experimental</a-tag>
+                    </a-typography-title>
+                    <a-typography-paragraph>
+                      <a-tooltip
+                        :title="t('TXT_CODE_use_compose_management_help')"
+                        placement="top"
+                      >
+                        <a-typography-text
+                          type="secondary"
+                          class="typography-text-ellipsis"
+                        >
+                          {{ t("TXT_CODE_use_compose_management_help") }}
+                        </a-typography-text>
+                      </a-tooltip>
+                    </a-typography-paragraph>
+                    <a-typography-text
+                      v-if="formData.instance.config.docker.useCompose"
+                      type="warning"
+                      style="display: block; margin-bottom: 12px"
+                    >
+                      {{ t("TXT_CODE_use_compose_warning") }}
+                    </a-typography-text>
+                    <a-switch
+                      v-model:checked="formData.instance.config.docker.useCompose"
+                      :disabled="isGlobalTerminal || isInstanceRunning"
+                      :checked-value="true"
+                      :un-checked-value="false"
+                    >
+                      <template #checkedChildren>
+                        <check-outlined />
+                      </template>
+                      <template #unCheckedChildren>
+                        <close-outlined />
+                      </template>
+                    </a-switch>
+                  </a-form-item>
+                </a-col>
+
                 <a-col :xs="24" :lg="16" :offset="0">
                   <a-form-item :name="['instance', 'config', 'docker', 'image']">
                     <a-typography-title :level="5" :class="{ 'require-field': isDockerMode }">
@@ -1106,7 +1276,7 @@ defineExpose({
                     <DockerImageSelect
                       :model-value="formData.instance.config?.docker?.image ?? ''"
                       :image-select-method="formData.instance.imageSelectMethod ?? 'SELECT'"
-                      :daemon-id="daemonId ?? ''"
+                      :daemon-id="daemonId ?? ''" :disabled="isComposeMode"
                       @update:model-value="(v) => (formData.instance.config!.docker!.image = v)"
                       @update:image-select-method="(v) => (formData.instance.imageSelectMethod = v)"
                     />
@@ -1130,7 +1300,7 @@ defineExpose({
                     </a-typography-paragraph>
                     <a-switch
                       v-model:checked="formData.instance.config.docker.changeWorkdir"
-                      :disabled="isGlobalTerminal"
+                      :disabled="isGlobalTerminal || isComposeMode"
                       :checked-value="true"
                       :un-checked-value="false"
                     >
@@ -1154,7 +1324,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input
-                      v-model:value="formData.instance.config.docker.workingDir"
+                      v-model:value="formData.instance.config.docker.workingDir" :disabled="isComposeMode"
                       :placeholder="t('TXT_CODE_2082f659')"
                     />
                   </a-form-item>
@@ -1171,7 +1341,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('volume')">
+                      <a-button type="default" @click="() => handleEditDockerConfig('volume')" :disabled="isComposeMode">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1189,7 +1359,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('port')">
+                      <a-button type="default" @click="() => handleEditDockerConfig('port')" :disabled="isComposeMode">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1213,7 +1383,7 @@ defineExpose({
                       :min="0"
                       :max="65535"
                       :placeholder="t('TXT_CODE_3bb646e4')"
-                      :disabled="isGlobalTerminal"
+                      :disabled="isGlobalTerminal || isComposeMode"
                       style="width: 100%"
                     />
                   </a-form-item>
@@ -1230,7 +1400,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('env')">
+                      <a-button type="default" @click="() => handleEditDockerConfig('env')" :disabled="isComposeMode">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1248,7 +1418,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('label')">
+                      <a-button type="default" @click="() => handleEditDockerConfig('label')" :disabled="isComposeMode">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1268,7 +1438,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-select
-                      v-model:value="formData.instance.config.docker.networkMode"
+                      v-model:value="formData.instance.config.docker.networkMode" :disabled="isComposeMode"
                       size="large"
                       style="width: 100%"
                       :placeholder="t('TXT_CODE_3bb646e4')"
@@ -1294,7 +1464,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input
-                      v-model:value="formData.instance.networkAliasesText"
+                      v-model:value="formData.instance.networkAliasesText" :disabled="isComposeMode"
                       :placeholder="t('TXT_CODE_8d4882b0')"
                     />
                   </a-form-item>
@@ -1313,7 +1483,7 @@ defineExpose({
                     <a-tooltip placement="bottom">
                       <template #title>{{ t("TXT_CODE_8d4882b0") }}</template>
                       <a-input
-                        v-model:value="formData.instance.config.docker.containerName"
+                        v-model:value="formData.instance.config.docker.containerName" :disabled="isComposeMode"
                         :placeholder="t('TXT_CODE_f6047384')"
                       />
                     </a-tooltip>
@@ -1338,7 +1508,7 @@ defineExpose({
                     <div class="ml-4">
                       <a-switch
                         v-model:checked="formData.instance.config.docker.privileged"
-                        :disabled="isGlobalTerminal"
+                        :disabled="isGlobalTerminal || isComposeMode"
                         :checked-value="true"
                         :un-checked-value="false"
                       >
@@ -1360,7 +1530,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('capability')">
+                      <a-button type="default" @click="() => handleEditDockerConfig('capability')" :disabled="isComposeMode">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1378,7 +1548,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('device')">
+                      <a-button type="default" @click="() => handleEditDockerConfig('device')" :disabled="isComposeMode">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1408,7 +1578,7 @@ defineExpose({
                       {{ t("TXT_CODE_dce87e42") }}
                     </template>
                     <a-input
-                      v-model:value="formData.instance.config.docker.cpuUsage"
+                      v-model:value="formData.instance.config.docker.cpuUsage" :disabled="isComposeMode"
                       :allow-clear="true"
                       :placeholder="t('TXT_CODE_91d857f5')"
                       suffix="%"
@@ -1431,7 +1601,7 @@ defineExpose({
                       {{ t("TXT_CODE_67c765be") }}
                     </template>
                     <a-input
-                      v-model:value="formData.instance.config.docker.cpusetCpus"
+                      v-model:value="formData.instance.config.docker.cpusetCpus" :disabled="isComposeMode"
                       :allow-clear="true"
                       :placeholder="t('TXT_CODE_30fe1717')"
                     />
@@ -1449,7 +1619,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-input
-                    v-model:value="formData.instance.config.docker.memory"
+                    v-model:value="formData.instance.config.docker.memory" :disabled="isComposeMode"
                     :allow-clear="true"
                     :placeholder="t('TXT_CODE_80790069')"
                     suffix="MB"
@@ -1468,7 +1638,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-input
-                    v-model:value="formData.instance.config.docker.memorySwap"
+                    v-model:value="formData.instance.config.docker.memorySwap" :disabled="isComposeMode"
                     :allow-clear="true"
                     :placeholder="t('TXT_CODE_6f1129fb')"
                   />
@@ -1508,7 +1678,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-input
-                    v-model:value="formData.instance.config.docker.memorySwappiness"
+                    v-model:value="formData.instance.config.docker.memorySwappiness" :disabled="isComposeMode"
                     :allow-clear="true"
                     :placeholder="t('TXT_CODE_6f1129fb')"
                   />
@@ -1527,7 +1697,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-input
-                    v-model:value="formData.instance.config.docker.uploadSpeedLimit"
+                    v-model:value="formData.instance.config.docker.uploadSpeedLimit" :disabled="isComposeMode"
                     :allow-clear="true"
                     :placeholder="t('TXT_CODE_network_upload_limit_placeholder')"
                     suffix="KB/s"
@@ -1547,7 +1717,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-input
-                    v-model:value="formData.instance.config.docker.downloadSpeedLimit"
+                    v-model:value="formData.instance.config.docker.downloadSpeedLimit" :disabled="isComposeMode"
                     :allow-clear="true"
                     :placeholder="t('TXT_CODE_network_download_limit_placeholder')"
                     suffix="KB/s"
@@ -1568,7 +1738,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-input
-                    v-model:value="formData.instance.deviceReadBpsText"
+                    v-model:value="formData.instance.deviceReadBpsText" :disabled="isComposeMode"
                     :allow-clear="true"
                     :placeholder="t('TXT_CODE_6542489a')"
                   />
@@ -1588,7 +1758,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-input
-                    v-model:value="formData.instance.deviceWriteBpsText"
+                    v-model:value="formData.instance.deviceWriteBpsText" :disabled="isComposeMode"
                     :allow-clear="true"
                     :placeholder="t('TXT_CODE_f0dc9eca')"
                   />
@@ -1610,7 +1780,7 @@ defineExpose({
                     </a-tooltip>
                   </a-typography-paragraph>
                   <a-switch
-                    v-model:checked="formData.instance.config.docker.gpuEnabled"
+                    v-model:checked="formData.instance.config.docker.gpuEnabled" :disabled="isComposeMode"
                     :checked-children="t('TXT_CODE_gpu_enabled')"
                     :un-checked-children="t('TXT_CODE_gpu_disabled')"
                   />
@@ -1630,7 +1800,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input
-                      v-model:value="formData.instance.config.docker.gpuDriver"
+                      v-model:value="formData.instance.config.docker.gpuDriver" :disabled="isComposeMode"
                       :placeholder="t('TXT_CODE_gpu_driver_placeholder')"
                     />
                   </a-form-item>
@@ -1671,7 +1841,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-number
-                      v-model:value="formData.instance.config.docker.gpuCount"
+                      v-model:value="formData.instance.config.docker.gpuCount" :disabled="isComposeMode"
                       :min="1"
                       :max="128"
                       :precision="0"
@@ -1693,12 +1863,35 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input
-                      v-model:value="gpuDeviceIdsText"
+                      v-model:value="gpuDeviceIdsText" :disabled="isComposeMode"
                       :placeholder="t('TXT_CODE_gpu_device_ids_placeholder')"
                     />
                   </a-form-item>
                 </a-col>
               </template>
+            </a-row>
+          </a-tab-pane>
+          <a-tab-pane
+            v-if="!isGlobalTerminal && isDockerMode"
+            :key="TabSettings.ComposeEditor"
+            :tab="t('TXT_CODE_compose_editor_tab')"
+          >
+            <a-row :gutter="20">
+              <a-col :span="24">
+                <a-alert
+                  :message="t('TXT_CODE_compose_editor_help')"
+                  type="info"
+                  show-icon
+                  style="margin-bottom: 12px"
+                />
+                <Editor
+                  v-if="composeLoaded"
+                  v-model:text="composeEditorText"
+                  filename="compose.yml"
+                  height="50vh"
+                />
+                <a-skeleton v-else :paragraph="{ rows: 10 }" active />
+              </a-col>
             </a-row>
           </a-tab-pane>
         </a-tabs>
