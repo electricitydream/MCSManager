@@ -269,6 +269,30 @@ router.get(
 );
 
 // [Low-level Permission]
+// Read the compose resource-limit info for display (memory/network/image/container name)
+router.get(
+  "/compose_info",
+  speedLimit(1),
+  permission({ level: ROLE.USER }),
+  validator({ query: { daemonId: String, uuid: String } }),
+  async (ctx) => {
+    try {
+      const daemonId = String(ctx.query.daemonId);
+      const instanceUuid = String(ctx.query.uuid);
+      const remoteService = RemoteServiceSubsystem.getInstance(daemonId);
+      const result = await new RemoteRequest(remoteService).request(
+        "file/compose_info",
+        { instanceUuid },
+        100000
+      );
+      ctx.body = result;
+    } catch (err) {
+      ctx.body = err;
+    }
+  }
+);
+
+// [Low-level Permission]
 // Save the managed compose file (validated by the daemon)
 router.put(
   "/compose_save",

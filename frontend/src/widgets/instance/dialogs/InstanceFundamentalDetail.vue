@@ -50,6 +50,10 @@ const initFormDetail = () => {
 
 const isDockerMode = computed(() => options.value?.config.processType === "docker");
 
+const isComposeMode = computed(
+  () => isDockerMode.value && options.value?.config?.docker?.useCompose === true
+);
+
 const openDialog = async () => {
   open.value = true;
   initFormDetail();
@@ -227,7 +231,7 @@ defineExpose({
                   :rows="5"
                   style="min-height: 40px"
                   :placeholder="isDockerMode ? t('TXT_CODE_98e7c829') : t('TXT_CODE_f50cfe2')"
-                  :disabled="!isDockerMode"
+                  :disabled="!isDockerMode || isComposeMode"
                 />
               </a-input-group>
             </a-form-item>
@@ -248,7 +252,7 @@ defineExpose({
               <a-input
                 v-model:value="options.config.updateCommand"
                 :placeholder="UPDATE_CMD_TEMPLATE"
-                :disabled="!isDockerMode"
+                :disabled="!isDockerMode || isComposeMode"
               />
             </a-form-item>
           </a-col>

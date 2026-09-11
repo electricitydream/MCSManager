@@ -53,6 +53,13 @@ const formatMemoryUsage = (usage?: number, limit?: number) => {
   return limit ? `${fUsage} / ${fLimit}` : fUsage;
 };
 
+// Disk usage display: when no quota is configured (limit missing/0) show an
+// explicit "∞ GiB" limit instead of the bare usage value.
+const formatDiskUsage = (usage?: number, limit?: number) => {
+  const fUsage = prettyBytes(usage ?? 0, prettyBytesConfig);
+  return limit ? `${fUsage} / ${prettyBytes(limit, prettyBytesConfig)}` : `${fUsage} / ∞ GiB`;
+};
+
 const formatNetworkSpeed = (bytes?: number) =>
   useByteUnit.value
     ? prettyBytes(bytes ?? 0, { ...prettyBytesConfig, binary: false }) + "/s"
@@ -119,7 +126,7 @@ const cards = computed<PerfCardItem[]>(() => {
       ? {
           key: "disk",
           label: t("TXT_CODE_DISK_USAGE"),
-          value: formatMemoryUsage(storageUsage || 0, storageLimit || 0),
+          value: formatDiskUsage(storageUsage || 0, storageLimit || 0),
           icon: HddOutlined,
           theme: "perf-card--disk",
           barPercent: storagePercent

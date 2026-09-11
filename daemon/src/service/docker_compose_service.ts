@@ -4,6 +4,7 @@ import path from "path";
 import { promisify } from "util";
 import yaml from "yaml";
 import Instance from "../entity/instance/instance";
+import { resolveDockerUserValue } from "../tools/system_user";
 import logger from "./log";
 
 const execFileAsync = promisify(execFile);
@@ -138,6 +139,91 @@ export class DockerComposeService {
   }
 
   /**
+   * 解析 compose 文件，提取展示用的资源限制信息（单服务）：
+   * - memory: services.<name>.deploy.resources.limits.memory，单位 M（默认 0）
+   * - networkMode: services.<name>.network_mode，或 networks 的第一个 key（自定义网络）
+   * - image: services.<name>.image
+   * - containerName: services.<name>.container_name
+   * 端口映射不支持，由前端显示 NotSupport
+   */
+  static async readComposeInfo(instance: Instance): Promise<{
+    memory: number;
+    networkMode: string;
+    image: string;
+    containerName: string;
+    portsNotSupported: true;
+  }> {
+    const { text, exists } = await this.readComposeContent(instance);
+    const info = {
+      memory: 0,
+      networkMode: "",
+      image: "",
+      containerName: "",
+      portsNotSupported: true as const
+    };
+    if (!exists) return info;
+
+    let parsed: any;
+    try {
+      parsed = yaml.parse(text);
+    } catch (err: any) {
+      logger.warn(`[DockerCompose] Failed to parse compose file for info: ${err?.message || err}`);
+      return info;
+    }
+    if (!parsed?.services || typeof parsed.services !== "object") return info;
+
+    const serviceName = Object.keys(parsed.services)[0];
+    const service = parsed.services[serviceName];
+    if (!service || typeof service !== "object") return info;
+
+    // memory: deploy.resources.limits.memory, e.g. "2048M" / "2G" / 2048
+    const rawMemory = service?.deploy?.resources?.limits?.memory;
+    info.memory = this.parseMemoryToMB(rawMemory);
+
+    // network_mode: host/bridge/none; or networks (list short syntax or mapping)
+    if (typeof service.network_mode === "string" && service.network_mode) {
+      info.networkMode = service.network_mode;
+    } else if (Array.isArray(service.networks) && service.networks.length > 0) {
+      // short syntax: networks: [name1, name2]
+      const first = service.networks[0];
+      if (typeof first === "string" && first) info.networkMode = first;
+    } else if (service.networks && typeof service.networks === "object") {
+      // long syntax: networks: {name: {...}}
+      const networkName = Object.keys(service.networks)[0];
+      if (networkName) info.networkMode = networkName;
+    }
+
+    if (typeof service.image === "string") info.image = service.image;
+    if (typeof service.container_name === "string") info.containerName = service.container_name;
+    return info;
+  }
+
+  /**
+   * 将 docker/compose 的 memory 值换算为 MB
+   * 支持: 2048 / "2048M" / "2G" / "512m" / "1.5g" / "256K" / "1B" 等形式
+   */
+  private static parseMemoryToMB(raw: unknown): number {
+    if (raw == null) return 0;
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      // 纯数字按 compose 语义视为 bytes
+      return Math.round(raw / (1024 * 1024));
+    }
+    if (typeof raw !== "string") return 0;
+    const m = raw.trim().match(/^(\d+(?:\.\d+)?)\s*([kKmMgGtT]?)[bB]?$/);
+    if (!m) return 0;
+    const value = parseFloat(m[1]);
+    const unit = m[2].toLowerCase();
+    const multipliers: Record<string, number> = {
+      "": 1 / (1024 * 1024), // bytes
+      k: 1 / 1024,
+      m: 1,
+      g: 1024,
+      t: 1024 * 1024
+    };
+    return Math.round(value * multipliers[unit]);
+  }
+
+  /**
    * 获取 override 文件路径
    * 存放在 data/InstanceCompose/override/<instance_uuid>.yml
    * 独立分类目录，避免污染 InstanceConfig（上游代码假设该目录内全部为 <uuid>.json 文件）
@@ -157,15 +243,23 @@ export class DockerComposeService {
     const overrideDir = path.dirname(overridePath);
     await fs.mkdirs(overrideDir);
 
+    // Resolve runAs to a docker user value; empty -> key omitted entirely
+    const dockerUser = await resolveDockerUserValue(instance.config.runAs);
+
+    const serviceOverride: Record<string, any> = {
+      tty: true,
+      stdin_open: true,
+      labels: {
+        "mcsmanager.instance.uuid": instance.instanceUuid
+      }
+    };
+    if (dockerUser) {
+      serviceOverride.user = dockerUser;
+    }
+
     const overrideContent = yaml.stringify({
       services: {
-        [serviceName]: {
-          tty: true,
-          stdin_open: true,
-          labels: {
-            "mcsmanager.instance.uuid": instance.instanceUuid
-          }
-        }
+        [serviceName]: serviceOverride
       }
     });
 

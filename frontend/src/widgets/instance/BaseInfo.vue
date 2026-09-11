@@ -184,5 +184,10 @@ onMounted(async () => {
     </template>
   </CardPanel>
 
-  <DockerInfo ref="DockerInfoDialog" :docker-info="instanceInfo?.config.docker" />
+  <DockerInfo
+    ref="DockerInfoDialog"
+    :docker-info="instanceInfo?.config.docker"
+    :daemon-id="daemonId"
+    :instance-uuid="instanceId"
+  />
 </template>

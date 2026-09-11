@@ -328,13 +328,14 @@ const isInstanceRunning = computed(
 );
 
 // 开启 compose 时，其余 Docker 配置项均不适用：把非 compose 字段重置为默认空值，
-// 仅保留 useCompose / composeRemoveContainer 两个开关本身。
+// 仅保留 useCompose / composeRemoveContainer 两个开关本身；
+// maxSpace（磁盘配额）与容器化方式无关，compose 模式同样生效，一并保留。
 const clearNativeDockerFields = () => {
   const docker: any = formData.value?.instance?.config?.docker;
   if (!docker) return;
   const defaults: any = { ...defaultDockerConfig };
   Object.keys(docker).forEach((k) => {
-    if (k === "useCompose" || k === "composeRemoveContainer") return;
+    if (k === "useCompose" || k === "composeRemoveContainer" || k === "maxSpace") return;
     if (k in defaults) docker[k] = defaults[k];
   });
   // 同步清空绑定的文本辅助字段
@@ -1003,6 +1004,7 @@ defineExpose({
                       v-model:value="formData.instance.config.startCommand"
                       :rows="5"
                       style="min-height: 40px"
+                      :disabled="isComposeMode"
                       :placeholder="isDockerMode ? t('TXT_CODE_98e7c829') : t('TXT_CODE_f50cfe2')"
                     />
                   </a-input-group>
@@ -1086,7 +1088,7 @@ defineExpose({
                   <a-input
                     v-model:value="formData.instance.config.updateCommand"
                     :placeholder="UPDATE_CMD_TEMPLATE"
-                    :disabled="isGlobalTerminal"
+                    :disabled="isGlobalTerminal || isComposeMode"
                   />
                 </a-form-item>
               </a-col>

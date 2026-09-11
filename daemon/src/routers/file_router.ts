@@ -162,6 +162,18 @@ routerApp.on("file/compose_content", async (ctx, data) => {
   }
 });
 
+// Read the compose resource-limit info for display (memory/network/image/container name)
+routerApp.on("file/compose_info", async (ctx, data) => {
+  try {
+    const instance = InstanceSubsystem.getInstance(data.instanceUuid);
+    if (!instance) throw new Error($t("TXT_CODE_3bfb9e04"));
+    const result = await DockerComposeService.readComposeInfo(instance);
+    protocol.response(ctx, result);
+  } catch (error: any) {
+    protocol.responseError(ctx, error);
+  }
+});
+
 // Save the managed compose file content (validates YAML and single-service)
 routerApp.on("file/compose_save", async (ctx, data) => {
   try {

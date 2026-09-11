@@ -252,6 +252,7 @@
   "TXT_CODE_use_compose_management": "使用 Docker Compose 管理",
   "TXT_CODE_use_compose_management_help": "启用后，实例将通过 Compose 文件管理容器（在「Compose 编辑器」tab 中在线编辑）。（仅支持单服务 compose 文件，服务数 >1 会拒绝启动）",
   "TXT_CODE_use_compose_warning": "Compose 模式下，容器的生命周期由 compose 管理，停止/重启/状态跟踪行为可能与原生 Docker 模式不同。",
+  "TXT_CODE_composeInfoNotSet": "未设置",
   "TXT_CODE_compose_editor_tab": "Compose 编辑器",
   "TXT_CODE_compose_editor_help": "在线编辑本实例的 Compose 文件（保存在 data/InstanceCompose/<实例ID>.yml）。文件内相对路径相对实例工作目录解析，仅支持单服务。修改后点击弹窗底部的「确定」随实例设置一起保存（或按 Ctrl+S 单独保存），需重启实例生效。",
   "TXT_CODE_25924d5a": "实体处理的最大ticks",
