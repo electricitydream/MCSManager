@@ -7,8 +7,10 @@ import path from "path";
 import { compress, decompress, listArchiveEntries } from "../common/compress";
 import { globalConfiguration } from "../entity/config";
 import { $t, i18next } from "../i18n";
+import { syncPathOwnershipWithinRoot } from "../tools/file_ownership";
+import type { FileOwnership } from "../tools/file_ownership";
 import { normalizedJoin } from "../tools/filepath";
-import { resolveRealPath } from "../tools/path_link_check";
+import { resolvePhysicalPath } from "../tools/path_link_check";
 
 const ERROR_MSG_01 = $t("TXT_CODE_system_file.illegalAccess");
 const ERROR_PATH_NOT_FOUND = $t("TXT_CODE_96281410");
@@ -47,8 +49,8 @@ export default class FileManager {
   private isOutsideWorkspace(absPath: string): boolean {
     // fix the /app/ vs /app mismatch bug and keep it secure
     if (this.isRootTopRath()) return false;
-    const realTop = resolveRealPath(this.topPath);
-    const realPath = resolveRealPath(absPath);
+    const realTop = resolvePhysicalPath(this.topPath);
+    const realPath = resolvePhysicalPath(absPath);
     if (!realTop || !realPath) return true; // If the path cannot be resolved, treat it as outside for safety
     const relative = path.relative(realTop, realPath);
     return relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative);
@@ -59,7 +61,11 @@ export default class FileManager {
 
     let finalPath = "";
     if (path.normalize(fileName).indexOf(topAbsolutePath) === 0) {
-      finalPath = fileName;
+      // This value is what every caller passes to fs, so it must be the value the
+      // containment check below validates. Keeping the raw caller string let a
+      // symlink followed by '..' pass the lexical check and then be resolved
+      // physically by the kernel, escaping the instance workspace.
+      finalPath = path.normalize(fileName);
     } else if (os.platform() === "win32") {
       const reg = new RegExp("^[A-Za-z]{1}:[\\\\/]{1}");
       if (reg.test(this.cwd)) {
@@ -262,29 +268,54 @@ export default class FileManager {
     await fs.move(targetPath, destPath);
   }
 
-  async unzip(sourceZip: string, destDir: string, code?: string) {
+  async unzip(sourceZip: string, destDir: string, code?: string, ownership?: FileOwnership) {
     if (!code) code = this.fileCode;
     if (!this.check(sourceZip) || !this.checkPath(destDir)) throw new Error(ERROR_MSG_01);
     this.zipFileCheck(this.toAbsolutePath(sourceZip));
     const absSource = this.toAbsolutePath(sourceZip);
     const absDest = this.toAbsolutePath(destDir);
 
-    const hasZipSlip = await this.hasZipSlip(absSource, absDest);
+    const archiveEntries = await this.getArchiveEntries(absSource);
+    const hasZipSlip = this.hasZipSlip(absDest, archiveEntries);
     if (hasZipSlip) throw new Error(ERROR_MSG_01);
 
-    return await decompress(absSource, absDest, code);
+    const result = await decompress(absSource, absDest, code);
+    if (ownership) await this.syncArchiveOwnership(absDest, archiveEntries, ownership);
+    return result;
   }
 
-  private async hasZipSlip(absSource: string, absDest: string): Promise<boolean> {
+  private async getArchiveEntries(
+    absSource: string
+  ): Promise<Array<{ name: string; isDirectory: boolean; linkTarget?: string }>> {
     const zip = new StreamZip.async({ file: absSource });
-
-    let archiveEntries: Array<{ name: string; isDirectory: boolean }>;
+    let archiveEntries: Array<{ name: string; isDirectory: boolean; linkTarget?: string }>;
     try {
       // zip archive
-      archiveEntries = Object.values(await zip.entries());
+      const zipEntries = Object.values(await zip.entries());
+      archiveEntries = [];
+      for (const zipEntry of zipEntries) {
+        const entry: { name: string; isDirectory: boolean; linkTarget?: string } = {
+          name: zipEntry.name,
+          isDirectory: zipEntry.isDirectory
+        };
+        // Unix-created zips store symlinks with the link target as entry data
+        // and the S_IFLNK mode in the high attribute bits. The target must be
+        // part of the containment check below, so read it here and fail closed
+        // when it cannot be read.
+        if (!zipEntry.isDirectory && ((zipEntry.attr >>> 16) & 0xf000) === 0xa000) {
+          let target: Buffer;
+          try {
+            target = await zip.entryData(zipEntry.name);
+          } catch {
+            throw new Error(ERROR_MSG_01);
+          }
+          entry.linkTarget = target.toString("utf8");
+        }
+        archiveEntries.push(entry);
+      }
     } catch (err: any) {
       const reason = String(err?.message);
-      if (reason.includes("Malicious entry")) return true;
+      if (reason.includes("Malicious entry")) throw new Error(ERROR_MSG_01);
       if (reason !== "Bad archive" && reason !== "Archive read error") throw err;
 
       // other archive
@@ -292,10 +323,25 @@ export default class FileManager {
     } finally {
       await zip.close().catch(() => {});
     }
+    return archiveEntries;
+  }
 
-    const entryDirs = new Set<string>();
+  private hasZipSlip(
+    absDest: string,
+    archiveEntries: Array<{ name: string; isDirectory: boolean; linkTarget?: string }>
+  ): boolean {
+    // Extractors interpret BOTH '\' and '/' as separators (7-Zip normalizes
+    // '\'), so reason about entry names exactly as they will be written.
+    const destRoot = resolvePhysicalPath(absDest) ?? absDest;
+    const escapesDest = (physicalPath: string | null) => {
+      if (!physicalPath) return true;
+      const relative = path.relative(destRoot, physicalPath);
+      return relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative);
+    };
+
     for (const entry of archiveEntries) {
-      const entryPath = path.resolve(absDest, entry.name);
+      const name = entry.name.split(/[\\/]/).join(path.sep);
+      const entryPath = path.resolve(absDest, name);
       const relativeEntryPath = path.relative(absDest, entryPath);
       if (
         relativeEntryPath === ".." ||
@@ -304,13 +350,57 @@ export default class FileManager {
       ) {
         return true;
       }
-      entryDirs.add(entry.isDirectory ? entryPath : path.dirname(entryPath));
-    }
 
-    for (const entryDir of entryDirs) {
-      if (this.isOutsideWorkspace(entryDir)) return true;
+      // path.resolve() above collapses '..' textually: '<dest>/link/../x'
+      // becomes '<dest>/x', while the extractor resolves 'link' first and then
+      // applies '..' to its target's parent — escaping whenever 'link' points
+      // outside. Re-check the UNCOLLAPSED shape with kernel semantics.
+      const physicalEntry = resolvePhysicalPath(absDest + path.sep + name);
+      if (!physicalEntry || escapesDest(physicalEntry)) return true;
+
+      // A symlink entry is created before later entries are extracted through
+      // it, so a target that leaves the workspace is an escape hatch even when
+      // every entry name looks innocent (e.g. target 'link' chained through a
+      // pre-existing outward link).
+      if (entry.linkTarget) {
+        const target = entry.linkTarget.split(/[\\/]/).join(path.sep);
+        const linkDir = path.dirname(physicalEntry);
+        const rawTarget = path.isAbsolute(target) ? target : linkDir + path.sep + target;
+        if (this.isOutsideWorkspace(rawTarget)) return true;
+      }
     }
     return false;
+  }
+
+  private async syncArchiveOwnership(
+    absDest: string,
+    archiveEntries: Array<{ name: string; isDirectory: boolean }>,
+    ownership: FileOwnership
+  ): Promise<void> {
+    const paths = new Set<string>();
+    for (const entry of archiveEntries) {
+      const entryPath = path.resolve(absDest, entry.name);
+      if (entryPath === absDest) continue;
+      paths.add(entryPath);
+
+      let parentPath = path.dirname(entryPath);
+      while (parentPath !== absDest) {
+        paths.add(parentPath);
+        const nextParent = path.dirname(parentPath);
+        if (nextParent === parentPath) break;
+        parentPath = nextParent;
+      }
+    }
+
+    const orderedPaths = [...paths].sort((a, b) => b.length - a.length);
+    for (const targetPath of orderedPaths) {
+      try {
+        await syncPathOwnershipWithinRoot(this.topPath, targetPath, ownership);
+      } catch (error: any) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+    }
   }
 
   async zip(sourceZip: string, files: string[], code?: string) {
