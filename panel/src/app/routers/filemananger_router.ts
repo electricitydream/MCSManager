@@ -302,11 +302,15 @@ router.get(
 
 // [Low-level Permission]
 // Save the managed compose file (validated by the daemon)
+// Note: do NOT validate `text` here — empty compose text is legal (clears the
+// file) and validator.ts's `String` type rejects empty strings with
+// "Validator failed: \"text\" is required!". The daemon's saveComposeContent()
+// re-validates the YAML and rejects empty/illegal payloads with a clear error.
 router.put(
   "/compose_save",
   speedLimit(1),
   permission({ level: ROLE.USER }),
-  validator({ query: { daemonId: String, uuid: String }, body: { text: String } }),
+  validator({ query: { daemonId: String, uuid: String } }),
   async (ctx) => {
     try {
       const daemonId = String(ctx.query.daemonId);
