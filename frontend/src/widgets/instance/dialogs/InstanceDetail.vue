@@ -423,11 +423,11 @@ watch(activeKey, (key) => {
   }
 });
 
-// 阻止切到 disabled 的 Compose Editor tab (被禁用时回退到 Basic)
+// 阻止切到 disabled 的 Compose Editor tab (被禁用时回退到 Docker 容器化设置 tab + 提示)
 watch(activeKey, (key) => {
   if (key === TabSettings.ComposeEditor && isComposeTabDisabled.value) {
-    activeKey.value = TabSettings.Basic;
-    message.warning(t("TXT_CODE_use_compose_management") + ": " + t("TXT_CODE_use_compose_management_help"));
+    activeKey.value = TabSettings.Docker;
+    message.warning(t("TXT_CODE_compose_tab_disabled_warning"));
   }
 });
 
