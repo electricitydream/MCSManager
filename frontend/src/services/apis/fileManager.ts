@@ -284,6 +284,57 @@ export const fileContent = useDefineApi<
   timeout: Number.MAX_SAFE_INTEGER
 });
 
+export const composeContent = useDefineApi<
+  {
+    params: {
+      daemonId: string;
+      uuid: string;
+    };
+  },
+  { text: string; exists: boolean }
+>({
+  url: "/api/files/compose_content",
+  method: "GET",
+  timeout: Number.MAX_SAFE_INTEGER
+});
+
+export const composeInfo = useDefineApi<
+  {
+    params: {
+      daemonId: string;
+      uuid: string;
+    };
+  },
+  {
+    memory: number;
+    networkMode: string;
+    image: string;
+    containerName: string;
+    portsNotSupported: true;
+  }
+>({
+  url: "/api/files/compose_info",
+  method: "GET",
+  timeout: Number.MAX_SAFE_INTEGER
+});
+
+export const composeSave = useDefineApi<
+  {
+    params: {
+      daemonId: string;
+      uuid: string;
+    };
+    data: {
+      text: string;
+    };
+  },
+  { services: string[] }
+>({
+  url: "/api/files/compose_save",
+  method: "PUT",
+  timeout: Number.MAX_SAFE_INTEGER
+});
+
 export const changePermission = useDefineApi<
   {
     params: {

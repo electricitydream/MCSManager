@@ -183,6 +183,7 @@ async function listenExitSig(signal: string, isForce = true) {
         // Soft shutdown with configurable strategy
         await InstanceSubsystem.softExit(
           Boolean(config.softShutdownSkipDocker),
+          Boolean(config.softShutdownSkipDockerCompose),
           Number(config.softShutdownWaitSeconds) || 10
         );
       }

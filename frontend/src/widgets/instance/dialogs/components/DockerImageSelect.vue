@@ -15,6 +15,7 @@ const IMAGE_DEFINE = {
 const props = defineProps<{
   modelValue: string;
   daemonId?: string;
+  disabled?: boolean;
   isAllowEmpty?: boolean;
   isAllowText?: string;
   isAllowHost?: boolean;
@@ -107,6 +108,7 @@ const updateImage = (image: string) => {
       size="large"
       style="width: 100%"
       :placeholder="t('TXT_CODE_3bb646e4')"
+      :disabled="disabled"
       :loading="loading"
       @focus="loadImages"
       @update:value="(v: any) => updateImage(v)"
@@ -122,6 +124,7 @@ const updateImage = (image: string) => {
     <a-input
       :value="modelValue"
       :placeholder="t('TXT_CODE_d7638d7b')"
+      :disabled="disabled"
       @update:value="(v: any) => updateImage(v)"
     />
   </template>

@@ -31,11 +31,9 @@ class DiskLimitService {
 
   async checkInstanceDiskSize(instance: Instance) {
     const maxSpace = Number(instance.config.docker.maxSpace);
-    // Defensive guard: maxSpace <= 0 means the quota feature is disabled
-    // (default 0 / unset / negative). The 45s lifecycle task already filters
-    // these out, but this keeps the service contract self-contained so other
-    // callers cannot enqueue useless `du` jobs.
-    if (maxSpace <= 0) return;
+    // maxSpace <= 0 (default 0 / unset / negative) means the quota feature is
+    // disabled — but we still scan the usage for display purposes; the
+    // auto-stop logic inside `checkDiskNow` only fires when storageLimit > 0.
     const workspace = instance.absoluteCwdPath();
     this.queue.push({
       key: instance.instanceUuid,
@@ -82,7 +80,9 @@ class DiskLimitService {
 
   private getCheckDefaultValue(instance: Instance, maxSpace = 0) {
     instance.info.storageUsage = 0;
-    instance.info.storageLimit = maxSpace;
+    // No quota configured (maxSpace <= 0): storageLimit is undefined so the
+    // frontend can render the "unlimited" (∞) display.
+    instance.info.storageLimit = maxSpace > 0 ? maxSpace : undefined;
     return {
       isFull: false,
       storageLimit: maxSpace,
@@ -116,22 +116,26 @@ class DiskLimitService {
 
     if (isNaN(Number(diskUsageSizeMb))) {
       instance.info.storageUsage = 0;
-      instance.info.storageLimit = convertGBToBytes(maxSpace); // GB to bytes
+      // GB to bytes; undefined when no quota is configured (unlimited)
+      instance.info.storageLimit = maxSpace > 0 ? convertGBToBytes(maxSpace) : undefined;
     } else {
       instance.info.storageUsage = diskUsageSizeMb * 1024 * 1024; // MB to bytes
-      instance.info.storageLimit = convertGBToBytes(maxSpace); // GB to bytes
+      instance.info.storageLimit = maxSpace > 0 ? convertGBToBytes(maxSpace) : undefined;
     }
 
     const storageLimit = instance.info.storageLimit;
     const storageUsage = instance.info.storageUsage;
 
-    if (autoStop) {
-      if (storageUsage >= storageLimit && storageLimit > 0) {
+    // Quota enforcement only applies when a positive limit is configured.
+    const hasQuota = typeof storageLimit === "number" && storageLimit > 0;
+
+    if (autoStop && hasQuota) {
+      if (storageUsage >= storageLimit) {
         for (let i = 0; i < 3; i++) {
           instance.println(
             "WARNING",
             $t("TXT_CODE_f94734d8", {
-              storageLimit: convertBytesToGB(storageLimit),
+              storageLimit: convertBytesToGB(storageLimit!),
               storageUsage: convertBytesToGB(storageUsage)
             })
           );
@@ -143,8 +147,8 @@ class DiskLimitService {
     }
 
     return {
-      isFull: storageUsage >= storageLimit && storageLimit > 0,
-      storageLimit: convertBytesToGB(storageLimit),
+      isFull: hasQuota && storageUsage >= storageLimit!,
+      storageLimit: hasQuota ? convertBytesToGB(storageLimit!) : 0,
       storageUsage: convertBytesToGB(storageUsage)
     };
   }

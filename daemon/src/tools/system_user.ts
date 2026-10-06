@@ -3,6 +3,7 @@ import { exec } from "child_process";
 import Instance from "../entity/instance/instance";
 import { chown } from "fs/promises";
 import { $t } from "../i18n";
+import logger from "../service/log";
 
 // Promisify the exec function to use async/await
 const execAsync = promisify(exec);
@@ -47,6 +48,29 @@ export async function getLinuxSystemId(username: string): Promise<{ uid: number;
   } catch (error: any) {
     throw new Error(`Unable to retrieve UID/GID for user "${sanitizedUsername}": ${error.message}`);
   }
+}
+
+/**
+ * Resolve the docker "--user" value for a runAs config string.
+ * - Empty/whitespace  -> undefined (use image default user)
+ * - "uid" / "uid:gid"  -> used as-is
+ * - username (Linux)   -> resolved to "uid:gid" via `id` command;
+ *                         falls back to the raw name when resolution fails
+ */
+export async function resolveDockerUserValue(runAs?: string): Promise<string | undefined> {
+  const trimmed = runAs?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.includes(":") || /^\d+$/.test(trimmed)) return trimmed;
+  if (process.platform === "linux") {
+    try {
+      const { uid, gid } = await getLinuxSystemId(trimmed);
+      return `${uid}:${gid}`;
+    } catch (error: any) {
+      logger.warn(`Failed to get UID/GID for user ${trimmed}: ${error.message}`);
+    }
+  }
+  // Windows/non-linux or resolution failed: pass the raw value through
+  return trimmed;
 }
 
 export async function getRunAsUserParams(instance: Instance) {

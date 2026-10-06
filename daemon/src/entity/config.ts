@@ -41,6 +41,7 @@ class Config {
   // Daemon shutdown behavior
   public enableSoftShutdown = true;
   public softShutdownSkipDocker = true;
+  public softShutdownSkipDockerCompose = false;
   public softShutdownWaitSeconds = 30;
 
   public whiteListPanelIp = false;

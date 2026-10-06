@@ -16,6 +16,7 @@ import { commandStringToArray } from "../entity/commands/base/command_parser";
 import DockerPullCommand from "../entity/commands/docker/docker_pull";
 import Instance from "../entity/instance/instance";
 import { DefaultDocker } from "./docker_service";
+import { DockerComposeService } from "./docker_compose_service";
 
 import Docker from "dockerode";
 import fs from "fs-extra";
@@ -190,6 +191,14 @@ export class SetupDockerContainer extends AsyncTask {
         `Failed to chmod the instance directory to 777: ${this.instance.absoluteCwdPath()}`
       );
     });
+
+    // Compose mode: manage the container via docker-compose.yml instead of creating it directly.
+    // Only single-service compose files are supported; a multi-service compose file is rejected
+    // so the console can attach to exactly one container.
+    if (instance.config.docker?.useCompose) {
+      await this.startWithCompose();
+      return;
+    }
 
     try {
       await instance.forceExec(new DockerPullCommand(this.imageOverride?.trim()));
@@ -627,7 +636,73 @@ export class SetupDockerContainer extends AsyncTask {
     this.container.wait(() => this.stop());
   }
 
+  // Compose mode: start the only service defined in docker-compose.yml and bind to its
+  // container. Only a single-service compose file is supported: a multi-service file is
+  // rejected up front so the console always attaches to exactly one container.
+  private async startWithCompose() {
+    const instance = this.instance;
+    if (this.startCommand || this.imageOverride) {
+      throw new StartupDockerProcessError(
+        "Compose mode does not support a custom start command or image override. " +
+          "The startup command must be defined in docker-compose.yml."
+      );
+    }
+
+    const check = await DockerComposeService.checkComposeSingle(instance);
+    if (!check.valid) {
+      throw new StartupDockerProcessError(check.error || "Compose file check failed");
+    }
+
+    // 1. 解析服务名
+    const serviceNames = await DockerComposeService.getServiceNames(instance);
+    const serviceName = serviceNames[0];
+
+    // 2. 生成 override 文件(注入 mcsmanager.instance.uuid label)
+    const overrideFile = await DockerComposeService.generateOverrideFile(instance, serviceName);
+
+    instance.println(
+      "INFO",
+      `Use docker compose to manage this instance (services: ${check.count}, override: ${path.basename(overrideFile)})`
+    );
+
+    // 3. 双 -f 启动: 受管 compose 文件 + override 文件
+    await DockerComposeService.up(instance, overrideFile);
+
+    // docker compose up -d returns before the container is fully created: poll briefly
+    // for the container id so we can bind this instance to it.
+    const docker = new DefaultDocker();
+    let containerId: string | null = null;
+    for (let i = 0; i < 15; i++) {
+      containerId = await DockerComposeService.getMainContainerId(instance);
+      if (containerId) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (!containerId) {
+      throw new StartupDockerProcessError("Failed to locate the container created by docker compose");
+    }
+
+    this.container = docker.getContainer(containerId);
+    logger.info(
+      `[DockerCompose] Instance ${instance.instanceUuid} bound to container ${containerId}`
+    );
+
+    // Listen to events
+    this.container.wait(() => this.stop());
+  }
+
   public async onStop() {
+    if (this.instance.config.docker?.useCompose) {
+      // Compose manages the container lifecycle: always bring the stack down
+      // (removing the container) when the instance is stopped.
+      try {
+        const overrideFile = DockerComposeService.getOverrideFilePath(this.instance);
+        await DockerComposeService.down(this.instance, overrideFile);
+      } catch (error) {
+        logger.error(`[DockerCompose] Failed to stop instance ${this.instance.instanceUuid}`, error);
+      }
+      return;
+    }
+
     const containerId = this.container?.id;
 
     try {
@@ -733,6 +808,10 @@ export class DockerProcessAdapter extends EventEmitter implements IInstanceProce
     this.stopping = true;
     this.clearReconnectTimer();
     this.closeStream();
+    if (this.containerWrapper.instance.config.docker?.useCompose) {
+      // Compose manages the container lifecycle: never remove the container ourselves.
+      return;
+    }
     try {
       await this.container?.remove();
     } catch (error: any) {}

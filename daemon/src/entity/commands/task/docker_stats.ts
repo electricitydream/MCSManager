@@ -164,7 +164,9 @@ export default class DockerStatsTask implements ILifeCycleTask {
   async start(instance: Instance) {
     const containerId = String(instance.process?.pid ?? "");
     if (!containerId) return;
-    if (!instance.config.docker?.image || instance.config.processType !== "docker") return;
+    const isCompose = instance.config.processType === "docker" && instance.config.docker?.useCompose;
+    if (!isCompose && (!instance.config.docker?.image || instance.config.processType !== "docker"))
+      return;
     this.task = setInterval(() => {
       this.updateStats(containerId, instance);
     }, 4000);
@@ -190,7 +192,10 @@ export default class DockerStatsTask implements ILifeCycleTask {
       readBytes: undefined,
       writeBytes: undefined,
       storageUsage: 0,
-      storageLimit: instance.config.docker?.maxSpace ?? 0
+      // undefined when no quota is configured (frontend renders "∞ GiB")
+      storageLimit: instance.config.docker?.maxSpace
+        ? instance.config.docker.maxSpace
+        : undefined
     };
   }
 }

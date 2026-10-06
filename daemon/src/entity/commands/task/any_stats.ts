@@ -2,9 +2,10 @@ import disk_limit_service from "../../../service/disk_limit_service";
 import Instance from "../../instance/instance";
 import { ILifeCycleTask } from "../../instance/life_cycle";
 
-// Disk quota is opt-in: maxSpace <= 0 (default 0 / unset / negative) means
-// the feature is disabled, so we skip the recursive `du` scan on the working
-// directory that would otherwise run every 45s for instances with no quota.
+// The disk usage scan runs for every running instance regardless of whether a
+// quota (maxSpace) is configured — the usage is displayed in the instance
+// overview/terminal header. Quota enforcement (auto-stop when full) only
+// applies when maxSpace > 0 and is handled inside the service.
 const CHECK_INTERVAL_MS = 1000 * 45;
 
 export default class InstanceDiskCheckTask implements ILifeCycleTask {
@@ -15,12 +16,7 @@ export default class InstanceDiskCheckTask implements ILifeCycleTask {
 
   async start(instance: Instance) {
     this.task = setInterval(() => {
-      // maxSpace <= 0 means the quota feature is disabled (default/unset/negative).
-      // Treat it as off and skip the `du` scan, avoiding useless disk I/O.
-      const maxSpace = Number(instance.config.docker?.maxSpace);
-      if (maxSpace > 0) {
-        disk_limit_service.checkInstanceDiskSize(instance);
-      }
+      disk_limit_service.checkInstanceDiskSize(instance);
     }, CHECK_INTERVAL_MS);
   }
 
@@ -29,7 +25,10 @@ export default class InstanceDiskCheckTask implements ILifeCycleTask {
     instance.info = {
       ...instance.info,
       storageUsage: 0,
-      storageLimit: instance.config.docker?.maxSpace ?? 0
+      // undefined when no quota is configured (frontend renders "∞ GiB")
+      storageLimit: instance.config.docker?.maxSpace
+        ? instance.config.docker.maxSpace
+        : undefined
     };
   }
 }

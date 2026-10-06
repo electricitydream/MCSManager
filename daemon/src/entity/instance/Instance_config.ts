@@ -93,7 +93,9 @@ export default class InstanceConfig implements IGlobalInstanceConfig {
     gpuDeviceIds: [],
     gpuDriver: "nvidia",
     deviceReadBps: [],
-    deviceWriteBps: []
+    deviceWriteBps: [],
+    useCompose: false,
+    composeRemoveContainer: true
   };
 
   public pingConfig = {

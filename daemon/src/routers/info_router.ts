@@ -57,6 +57,7 @@ routerApp.on("info/overview", async (ctx) => {
       outputBufferSize: globalConfiguration.config.outputBufferSize,
       enableSoftShutdown: globalConfiguration.config.enableSoftShutdown,
       softShutdownSkipDocker: globalConfiguration.config.softShutdownSkipDocker,
+      softShutdownSkipDockerCompose: globalConfiguration.config.softShutdownSkipDockerCompose,
       softShutdownWaitSeconds: globalConfiguration.config.softShutdownWaitSeconds
     },
     dockerPlatforms
@@ -76,6 +77,7 @@ routerApp.on("info/setting", async (ctx, data) => {
   const outputBufferSize = toNumber(data.outputBufferSize);
   const enableSoftShutdown = toBoolean(data.enableSoftShutdown);
   const softShutdownSkipDocker = toBoolean(data.softShutdownSkipDocker);
+  const softShutdownSkipDockerCompose = toBoolean(data.softShutdownSkipDockerCompose);
   const softShutdownWaitSeconds = toNumber(data.softShutdownWaitSeconds);
   if (language) {
     logger.warn($t("TXT_CODE_66e32091"), language);
@@ -110,6 +112,9 @@ routerApp.on("info/setting", async (ctx, data) => {
   }
   if (softShutdownSkipDocker != null) {
     globalConfiguration.config.softShutdownSkipDocker = softShutdownSkipDocker;
+  }
+  if (softShutdownSkipDockerCompose != null) {
+    globalConfiguration.config.softShutdownSkipDockerCompose = softShutdownSkipDockerCompose;
   }
   if (softShutdownWaitSeconds != null && softShutdownWaitSeconds >= 1 && softShutdownWaitSeconds <= 600) {
     globalConfiguration.config.softShutdownWaitSeconds = softShutdownWaitSeconds;
