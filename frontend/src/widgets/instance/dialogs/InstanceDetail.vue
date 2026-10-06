@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { h } from "vue";
 import {
   useDockerCapabilityEditDialog,
   useDockerDeviceEditDialog,
@@ -73,6 +74,42 @@ enum TabSettings {
   ComposeEditor
 }
 const activeKey = ref<TabSettings>(TabSettings.Basic);
+
+// 开启 compose 之前, 备份完整的原 Docker 配置 (用于关闭时恢复)
+// 只有首次进入开启流程时备份, 避免反复覆盖丢失用户的临时编辑
+let originalDockerSnapshot: any = null;
+const snapshotDockerConfig = () => {
+  if (originalDockerSnapshot) return; // 已备份过
+  const docker = formData.value?.instance?.config?.docker;
+  if (!docker) return;
+  // 深拷贝, 避免后续修改影响 snapshot
+  originalDockerSnapshot = JSON.parse(JSON.stringify(docker));
+};
+const restoreDockerConfig = () => {
+  if (!originalDockerSnapshot) return;
+  const docker = formData.value?.instance?.config?.docker;
+  if (!docker) return;
+  // 用备份恢复 (保留 useCompose=false / composeRemoveContainer / maxSpace 的当前值)
+  const snapshot: any = originalDockerSnapshot;
+  const dockerMutable: any = docker;
+  Object.keys(dockerMutable).forEach((k: string) => {
+    if (k === "useCompose" || k === "composeRemoveContainer" || k === "maxSpace") return;
+    if (k in snapshot) {
+      dockerMutable[k] = JSON.parse(JSON.stringify(snapshot[k]));
+    }
+  });
+  // 同步恢复绑定的文本辅助字段
+  formData.value.instance!.networkAliasesText = Array.isArray(snapshot.networks)
+    ? snapshot.networks.join(",")
+    : "";
+  formData.value.instance!.deviceReadBpsText = "";
+  formData.value.instance!.deviceWriteBpsText = "";
+  gpuDeviceIdsText.value = Array.isArray(snapshot.gpuDeviceIds)
+    ? snapshot.gpuDeviceIds.join(",")
+    : "";
+  // 备份失效, 等待下次开启时再备份
+  originalDockerSnapshot = null;
+};
 
 // ---- Compose Editor ----
 const composeEditorText = ref("");
@@ -323,16 +360,36 @@ const isComposeMode = computed(
   () => formData?.value?.instance?.config?.docker?.useCompose === true && isDockerMode.value
 );
 
+// Compose 编辑器选项卡的"使用 Docker Compose 管理"开关未开启时禁用
+const isComposeTabDisabled = computed(
+  () => !(formData?.value?.instance?.config?.docker?.useCompose === true)
+);
+
+// Compose 编辑器 tab 标题 (禁用时显示灰图标 + 提示, 启用时显示原标题)
+const composeEditorTabTitle = computed(() => {
+  const base = t("TXT_CODE_compose_editor_tab");
+  if (isComposeTabDisabled.value) {
+    return h("span", { style: "color: rgba(0,0,0,0.35)" }, [
+      h("span", { style: "margin-right: 6px" }, [h("lock-outlined", {})]),
+      base
+    ]);
+  }
+  return base;
+});
+
 const isInstanceRunning = computed(
   () => props.instanceInfo?.status === INSTANCE_STATUS_CODE.RUNNING
 );
 
-// 开启 compose 时，其余 Docker 配置项均不适用：把非 compose 字段重置为默认空值，
+// 开启 compose 时, 先备份原 Docker 配置 (用于关闭时恢复),
+// 然后把非 compose 字段重置为默认空值;
 // 仅保留 useCompose / composeRemoveContainer 两个开关本身；
 // maxSpace（磁盘配额）与容器化方式无关，compose 模式同样生效，一并保留。
 const clearNativeDockerFields = () => {
   const docker: any = formData.value?.instance?.config?.docker;
   if (!docker) return;
+  // 先备份 (深拷贝), 便于关闭 compose 时恢复
+  snapshotDockerConfig();
   const defaults: any = { ...defaultDockerConfig };
   Object.keys(docker).forEach((k) => {
     if (k === "useCompose" || k === "composeRemoveContainer" || k === "maxSpace") return;
@@ -345,8 +402,14 @@ const clearNativeDockerFields = () => {
   gpuDeviceIdsText.value = "";
 };
 
-watch(isComposeMode, (on) => {
-  if (on) clearNativeDockerFields();
+watch(isComposeMode, (on, prevOn) => {
+  if (on && !prevOn) {
+    // off → on: 备份 + 清空原 Docker 字段
+    clearNativeDockerFields();
+  } else if (!on && prevOn) {
+    // on → off: 恢复原 Docker 配置
+    restoreDockerConfig();
+  }
 });
 
 watch(activeKey, (key) => {
@@ -357,6 +420,14 @@ watch(activeKey, (key) => {
     initComposeKeydownListener();
   } else {
     removeComposeKeydownListener();
+  }
+});
+
+// 阻止切到 disabled 的 Compose Editor tab (被禁用时回退到 Basic)
+watch(activeKey, (key) => {
+  if (key === TabSettings.ComposeEditor && isComposeTabDisabled.value) {
+    activeKey.value = TabSettings.Basic;
+    message.warning(t("TXT_CODE_use_compose_management") + ": " + t("TXT_CODE_use_compose_management_help"));
   }
 });
 
@@ -1341,7 +1412,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('volume')" :disabled="isComposeMode">
+                      <a-button type="default" :disabled="isComposeMode" @click="() => handleEditDockerConfig('volume')">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1359,7 +1430,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('port')" :disabled="isComposeMode">
+                      <a-button type="default" :disabled="isComposeMode" @click="() => handleEditDockerConfig('port')">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1400,7 +1471,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('env')" :disabled="isComposeMode">
+                      <a-button type="default" :disabled="isComposeMode" @click="() => handleEditDockerConfig('env')">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1418,7 +1489,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('label')" :disabled="isComposeMode">
+                      <a-button type="default" :disabled="isComposeMode" @click="() => handleEditDockerConfig('label')">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1530,7 +1601,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('capability')" :disabled="isComposeMode">
+                      <a-button type="default" :disabled="isComposeMode" @click="() => handleEditDockerConfig('capability')">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1548,7 +1619,7 @@ defineExpose({
                       </a-tooltip>
                     </a-typography-paragraph>
                     <a-input-group compact>
-                      <a-button type="default" @click="() => handleEditDockerConfig('device')" :disabled="isComposeMode">
+                      <a-button type="default" :disabled="isComposeMode" @click="() => handleEditDockerConfig('device')">
                         {{ t("TXT_CODE_ad207008") }}
                       </a-button>
                     </a-input-group>
@@ -1874,7 +1945,7 @@ defineExpose({
           <a-tab-pane
             v-if="!isGlobalTerminal && isDockerMode"
             :key="TabSettings.ComposeEditor"
-            :tab="t('TXT_CODE_compose_editor_tab')"
+            :tab="composeEditorTabTitle"
           >
             <a-row :gutter="20">
               <a-col :span="24">
