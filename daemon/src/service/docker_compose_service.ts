@@ -4,6 +4,7 @@ import path from "path";
 import { promisify } from "util";
 import yaml from "yaml";
 import Instance from "../entity/instance/instance";
+import { $t } from "../i18n";
 import { resolveDockerUserValue } from "../tools/system_user";
 import logger from "./log";
 
@@ -84,20 +85,34 @@ export class DockerComposeService {
 
   /**
    * 保存 compose 文件内容（校验 YAML 合法且为单服务）
+   * 错误信息走 i18n (en/zh_CN 等), 走 languages/*.json
    */
   static async saveComposeContent(instance: Instance, text: string): Promise<{ services: string[] }> {
+    // 空内容特殊处理: 如果开了 useCompose, 提示用户先填 compose YAML
+    if (text == null || text.trim() === "") {
+      if (instance.config.docker?.useCompose) {
+        throw new Error($t("TXT_CODE_compose_empty_error"));
+      }
+      // 未开 compose 时允许清空文件 (留空等同删除, 实际写入空字符串)
+    }
+
     let parsed: any;
     try {
       parsed = yaml.parse(text);
     } catch (e: any) {
-      throw new Error(`Invalid YAML: ${e?.message || e}`);
+      throw new Error($t("TXT_CODE_compose_invalid_yaml", { err: e?.message || String(e) }));
     }
     if (!parsed || typeof parsed !== "object" || !parsed.services || typeof parsed.services !== "object") {
-      throw new Error("Compose file must define a top-level 'services' mapping");
+      throw new Error($t("TXT_CODE_compose_no_services"));
     }
     const services = Object.keys(parsed.services);
     if (services.length !== 1) {
-      throw new Error(`Expected exactly one service, found ${services.length}: ${services.join(", ")}`);
+      throw new Error(
+        $t("TXT_CODE_compose_multi_services", {
+          count: services.length,
+          names: services.join(", ")
+        })
+      );
     }
     await fs.mkdirp(this.getManagedComposeDir());
     await fs.writeFile(this.getManagedComposePath(instance), text, "utf-8");
