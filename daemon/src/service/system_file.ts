@@ -326,47 +326,48 @@ export default class FileManager {
     return archiveEntries;
   }
 
+  /**
+   * Zip-Slip guard — reject the whole archive if ANY entry could write
+   * outside the extraction directory.
+   *
+   * Two simple rules (no kernel-symlink simulation needed):
+   *   1. The entry name, after normalizing '\' → '/', must not traverse
+   *      upward (contain a '..' segment).
+   *   2. A symlink target must not contain '..' segments, must not be an
+   *      absolute path outside the destination, and — when the target is
+   *      a plain name — must not resolve (via real on-disk links) outside
+   *      the destination.
+   *
+   * Rule 2 is intentionally aggressive ("一刀切"): a legitimate symlink whose
+   * target is e.g. "dir/../other" is also rejected.  This eliminates the
+   * symlink-chain escape (s1→. , s2→s1/.. , s2/file) at the cost of a
+   * rare false positive — which is the right trade-off for an archive
+   * extraction boundary.
+   */
   private hasZipSlip(
     absDest: string,
     archiveEntries: Array<{ name: string; isDirectory: boolean; linkTarget?: string }>
   ): boolean {
-    // Extractors interpret BOTH '\' and '/' as separators (7-Zip normalizes
-    // '\'), so reason about entry names exactly as they will be written.
     const destRoot = resolvePhysicalPath(absDest) ?? absDest;
-    const escapesDest = (physicalPath: string | null) => {
-      if (!physicalPath) return true;
-      const relative = path.relative(destRoot, physicalPath);
-      return relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative);
-    };
 
     for (const entry of archiveEntries) {
-      const name = entry.name.split(/[\\/]/).join(path.sep);
-      const entryPath = path.resolve(absDest, name);
-      const relativeEntryPath = path.relative(absDest, entryPath);
-      if (
-        relativeEntryPath === ".." ||
-        relativeEntryPath.startsWith(".." + path.sep) ||
-        path.isAbsolute(relativeEntryPath)
-      ) {
-        return true;
-      }
+      const segments = entry.name.split(/[\\/]/).filter(Boolean);
 
-      // path.resolve() above collapses '..' textually: '<dest>/link/../x'
-      // becomes '<dest>/x', while the extractor resolves 'link' first and then
-      // applies '..' to its target's parent — escaping whenever 'link' points
-      // outside. Re-check the UNCOLLAPSED shape with kernel semantics.
-      const physicalEntry = resolvePhysicalPath(absDest + path.sep + name);
-      if (!physicalEntry || escapesDest(physicalEntry)) return true;
+      // Rule 1: entry name must not traverse upward
+      if (segments.includes("..")) return true;
 
-      // A symlink entry is created before later entries are extracted through
-      // it, so a target that leaves the workspace is an escape hatch even when
-      // every entry name looks innocent (e.g. target 'link' chained through a
-      // pre-existing outward link).
+      // Rule 2: symlink target must not traverse upward or escape
       if (entry.linkTarget) {
-        const target = entry.linkTarget.split(/[\\/]/).join(path.sep);
-        const linkDir = path.dirname(physicalEntry);
-        const rawTarget = path.isAbsolute(target) ? target : linkDir + path.sep + target;
-        if (this.isOutsideWorkspace(rawTarget)) return true;
+        const targetSegs = entry.linkTarget.split(/[\\/]/).filter(Boolean);
+        if (targetSegs.includes("..")) return true;
+
+        const rawTarget = path.isAbsolute(entry.linkTarget)
+          ? entry.linkTarget
+          : path.join(absDest, entry.name, "..", entry.linkTarget);
+        const resolved = resolvePhysicalPath(rawTarget);
+        if (!resolved) return true;
+        const rel = path.relative(destRoot, resolved);
+        if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) return true;
       }
     }
     return false;

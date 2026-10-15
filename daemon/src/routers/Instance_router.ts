@@ -8,9 +8,9 @@
  * destruction.
  *
  * After editing this file, AI assistants and developers MUST run the
- * `mcsmanager-docker-instance-test` skill and confirm the Docker + general
+ * `mcsmanager-test` skill and confirm the Docker + general
  * process instance cases pass before finishing.
- *   Skill: `.agents/skills/mcsmanager-docker-instance-test/SKILL.md`
+ *   Skill: `.agents/skills/mcsmanager-test/SKILL.md`
  */
 import fs from "fs-extra";
 import path from "path";
@@ -405,7 +405,7 @@ routerApp.on("instance/asynchronous", (ctx, data) => {
   if (taskName === "quick_install" && role === ROLE.ADMIN) {
     const newInstanceName = String(parameter.newInstanceName);
     const targetLink = String(parameter.targetLink);
-    logger.info(`Quick install: Name: ${newInstanceName} | Download: ${targetLink}`);
+    logger.info(`Quick install: Name: ${newInstanceName}`);
     const task = createQuickInstallTask(targetLink, newInstanceName, parameter.setupInfo);
     return protocol.response(ctx, task.toObject());
   }
