@@ -3176,7 +3176,10 @@
   "TXT_CODE_AUTOUPDATE_BTN_CANCEL": "Cancelar",
   "TXT_CODE_AUTOUPDATE_BTN_REFRESH": "Actualizar",
   "TXT_CODE_AUTOUPDATE_WEB_SOURCE": "Fuente de actualización (URL del manifest)",
-  "TXT_CODE_AUTOUPDATE_WEB_SOURCE_PH": "https://mcsmanager.com/upgrade/manifest.json",
+  "TXT_CODE_AUTOUPDATE_WEB_SOURCE_PH": "https://github.com/MCSManager/MCSManager/releases/latest/download/mcsmanager_update_manifest.json",
+  "TXT_CODE_AUTOUPDATE_WEB_SOURCE_BACKUP": "Fuente de actualización de respaldo (URL del manifest)",
+  "TXT_CODE_AUTOUPDATE_WEB_SOURCE_BACKUP_PH": "https://mcsmanager.com/upgrade/manifest.json",
+  "TXT_CODE_AUTOUPDATE_WEB_SOURCE_BACKUP_DESC": "Se usa automáticamente cuando la fuente principal supera el tiempo de espera o da error. Vacíe ambos campos para desactivar la comprobación de actualizaciones.",
   "TXT_CODE_AUTOUPDATE_WEB_SAVE": "Guardar",
   "TXT_CODE_AUTOUPDATE_B_ALREADY_PROGRESS": "Ya hay una actualización en curso",
   "TXT_CODE_AUTOUPDATE_B_LATEST_VER": "Ya está actualizado (v{{v}})",
@@ -3187,7 +3190,7 @@
   "TXT_CODE_AUTOUPDATE_B_APPLY_FAILED": "No se pudo aplicar el paquete de actualización",
   "TXT_CODE_AUTOUPDATE_TAB_TITLE": "Actualización automática",
   "TXT_CODE_AUTOUPDATE_WEB_TITLE_DESC": "Comprueba la versión actual del panel y si hay una versión más reciente disponible en línea.",
-  "TXT_CODE_AUTOUPDATE_WEB_SOURCE_DESC": "El panel obtiene el manifiesto de versiones y los paquetes de actualización desde esta URL.",
+  "TXT_CODE_AUTOUPDATE_WEB_SOURCE_DESC": "El panel obtiene primero el manifiesto de versiones y los paquetes de actualización de esta URL y usa la fuente de respaldo si falla. Vacíe ambos campos para desactivar la comprobación de actualizaciones.",
   "TXT_CODE_AUTOUPDATE_WEB_ACTION_DESC": "Descarga el paquete más reciente y sobrescribe los archivos del panel (app.js + front-end). Reinicie el panel manualmente después para aplicar los cambios.",
   "TXT_CODE_1389014c": "El usuario <<operator_name>> descomprimió el archivo <<file>> en la instancia <<instance_name>>",
   "TXT_CODE_162672b7": "El usuario <<operator_name>> desvinculó la cuenta SSO del usuario <<target_user_name>>",
@@ -3264,5 +3267,9 @@
   "TXT_CODE_file_ownership.invalidId": "{{label}} no válido en la configuración runAs de la instancia",
   "TXT_CODE_file_ownership.invalidTarget": "Acceso denegado: destino de propiedad no válido",
   "TXT_CODE_file_ownership.outsideWorkspace": "Acceso denegado: el destino de propiedad sale del espacio de trabajo de la instancia",
-  "TXT_CODE_file_ownership.targetChanged": "Acceso denegado: el destino de propiedad cambió durante la validación"
+  "TXT_CODE_file_ownership.targetChanged": "Acceso denegado: el destino de propiedad cambió durante la validación",
+  "TXT_CODE_5a455c84": "El panel está listo. Haz clic en el botón de abajo para comenzar.",
+  "TXT_CODE_637d8b7c": "Usar ahora",
+  "TXT_CODE_dcdbc73": "Comienza con recursos existentes o crea desde cero. Elige una opción para continuar.",
+  "TXT_CODE_c60e4ac2": "Enviar"
 }

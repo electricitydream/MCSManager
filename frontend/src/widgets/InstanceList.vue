@@ -20,6 +20,7 @@ import {
 import { computed, h, onMounted, ref } from "vue";
 
 import BetweenMenus from "@/components/BetweenMenus.vue";
+import { openMarketDialog } from "@/components/fc";
 import { router } from "@/config/router";
 import { useInstanceTagSearch, useInstanceTagTips } from "@/hooks/useInstanceTag";
 import { useScreen } from "@/hooks/useScreen";
@@ -39,7 +40,11 @@ import { Modal, notification } from "ant-design-vue";
 import { throttle } from "lodash";
 import type { InstanceMoreDetail } from "../hooks/useInstance";
 import { useInstanceMoreDetail } from "../hooks/useInstance";
-import { computeNodeName } from "../tools/nodes";
+import {
+  computeNodeName,
+  resolveStoredRemoteNode,
+  SELECTED_REMOTE_STORAGE_KEY
+} from "../tools/nodes";
 import type { NodeStatus } from "../types/index";
 import InstanceLine from "./instance/InstanceLine.vue";
 import Shortcut from "./instance/Shortcut.vue";
@@ -58,6 +63,14 @@ const operationForm = ref({
 
 const currentRemoteNode = ref<NodeStatus>();
 const isGlobalDaemonMode = computed(() => currentRemoteNode.value?.uuid === ALL_DAEMON_MODE);
+
+const globalNode: NodeStatus = {
+  uuid: ALL_DAEMON_MODE,
+  ip: "",
+  port: 0,
+  available: true,
+  remarks: ""
+};
 
 const { execute: getNodes, state: nodes, isLoading: loadingNodes } = remoteNodeList();
 const { execute: getInstances, state: instances, isLoading: loadingInstance } = remoteInstances();
@@ -91,14 +104,13 @@ const initNodes = async () => {
   if (nodes.value?.length === 0) {
     return reportErrorMsg(t("TXT_CODE_e3d96a26"));
   }
-  if (localStorage.getItem("pageSelectedRemote")) {
-    currentRemoteNode.value = JSON.parse(localStorage.pageSelectedRemote);
-    if (isGlobalDaemonMode.value) return;
-    if (!nodes.value?.some((item) => item.uuid === currentRemoteNode.value?.uuid)) {
-      currentRemoteNode.value = undefined;
-    }
-  } else {
-    currentRemoteNode.value = nodes.value?.[0];
+  currentRemoteNode.value = resolveStoredRemoteNode(
+    localStorage.getItem(SELECTED_REMOTE_STORAGE_KEY),
+    nodes.value ?? [],
+    globalNode
+  );
+  if (currentRemoteNode.value) {
+    localStorage.setItem(SELECTED_REMOTE_STORAGE_KEY, JSON.stringify(currentRemoteNode.value));
   }
 };
 
@@ -289,28 +301,14 @@ const handleChangeNode = async (item: NodeStatus) => {
     clearTags();
     selectedInstance.value = [];
     await initInstancesData(true);
-    localStorage.setItem("pageSelectedRemote", JSON.stringify(item));
+    localStorage.setItem(SELECTED_REMOTE_STORAGE_KEY, JSON.stringify(item));
   } catch (err: any) {
     console.error(err.message);
   }
 };
 
-const toCreateAppPage = () => {
-  router.push({
-    path: "/market",
-    query: {
-      daemonId: currentRemoteNode.value?.uuid
-    }
-  });
-};
-
 const toMarketPage = () => {
-  router.push({
-    path: "/market",
-    query: {
-      daemonId: currentRemoteNode.value?.uuid
-    }
-  });
+  openMarketDialog().catch(() => undefined);
 };
 
 const toNodesPage = () => {
@@ -530,14 +528,6 @@ const batchDeleteInstance = async (deleteFile: boolean) => {
   });
 };
 
-const globalNode = {
-  uuid: ALL_DAEMON_MODE,
-  ip: "",
-  port: 0,
-  available: true,
-  remarks: ""
-};
-
 onMounted(async () => {
   await initInstancesData();
   setRefreshFn(initInstancesData);
@@ -601,7 +591,7 @@ onMounted(async () => {
             <a-button
               type="primary"
               :disabled="!currentRemoteNode?.available"
-              @click="toCreateAppPage"
+              @click="toMarketPage"
             >
               {{ t("TXT_CODE_53408064") }}
             </a-button>
@@ -808,11 +798,6 @@ onMounted(async () => {
       >
         <div>
           <Empty :description="t('TXT_CODE_5415f009')" />
-        </div>
-        <div class="mt-20">
-          <a-button type="primary" @click="toMarketPage">
-            {{ t("TXT_CODE_871cb8bc") }}
-          </a-button>
         </div>
       </a-col>
     </a-row>

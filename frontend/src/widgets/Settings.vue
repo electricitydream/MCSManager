@@ -17,7 +17,7 @@ import { useLayoutContainerStore } from "@/stores/useLayoutContainerStore";
 import { arrayFilter } from "@/tools/array";
 import { pickLocalizedNotes } from "@/tools/localizedNotes";
 import { reportErrorMsg } from "@/tools/validator";
-import type { LayoutCard, Settings } from "@/types";
+import { DataPlaneMode, type LayoutCard, type Settings } from "@/types";
 import {
   ApiOutlined,
   BankOutlined,
@@ -179,6 +179,17 @@ const apiKeyAccessOptions = [
   {
     label: t("TXT_CODE_718c9310"),
     value: false
+  }
+];
+
+const dataPlaneOptions = [
+  {
+    label: t("TXT_CODE_settings_dataPlane_direct"),
+    value: DataPlaneMode.Direct
+  },
+  {
+    label: t("TXT_CODE_settings_dataPlane_proxy"),
+    value: DataPlaneMode.Proxy
   }
 ];
 
@@ -1021,6 +1032,30 @@ onUnmounted(() => {
                     </a-select>
                   </a-form-item>
 
+                  <a-form-item>
+                    <a-typography-title :level="5">
+                      {{ t("TXT_CODE_settings_dataPlane") }}
+                    </a-typography-title>
+                    <a-typography-paragraph>
+                      <a-typography-text type="secondary">
+                        {{ t("TXT_CODE_settings_dataPlane_hint") }}
+                      </a-typography-text>
+                    </a-typography-paragraph>
+
+                    <a-select
+                      v-model:value="(formData as any).dataPlane"
+                      style="max-width: 320px"
+                    >
+                      <a-select-option
+                        v-for="item in dataPlaneOptions"
+                        :key="item.value"
+                        :value="item.value"
+                      >
+                        {{ item.label }}
+                      </a-select-option>
+                    </a-select>
+                  </a-form-item>
+
                   <div class="button">
                     <a-button type="primary" :loading="submitIsLoading" @click="submit(false)">
                       {{ t("TXT_CODE_abfe9512") }}
@@ -1508,6 +1543,19 @@ onUnmounted(() => {
                       v-model:value="formData.updateSourceUrl"
                       style="max-width: 480px"
                       :placeholder="t('TXT_CODE_AUTOUPDATE_WEB_SOURCE_PH')"
+                    />
+                  </a-form-item>
+                  <a-form-item v-if="formData">
+                    <a-typography-title :level="5">
+                      {{ t("TXT_CODE_AUTOUPDATE_WEB_SOURCE_BACKUP") }}
+                    </a-typography-title>
+                    <a-typography-paragraph type="secondary">
+                      {{ t("TXT_CODE_AUTOUPDATE_WEB_SOURCE_BACKUP_DESC") }}
+                    </a-typography-paragraph>
+                    <a-input
+                      v-model:value="formData.updateSourceUrlFallback"
+                      style="max-width: 480px"
+                      :placeholder="t('TXT_CODE_AUTOUPDATE_WEB_SOURCE_BACKUP_PH')"
                     />
                   </a-form-item>
 
